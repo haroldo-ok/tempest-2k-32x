@@ -1,0 +1,16 @@
+# Action test: shooting lasers, firing Superzapper, moving Crawler Claw
+run 200
+press start 8
+run 60
+press start 8
+run 60
+press a 10
+run 20
+shot action_shoot
+press right 15
+run 20
+press c 5
+run 10
+shot action_zap
+run 60
+shot action_after
