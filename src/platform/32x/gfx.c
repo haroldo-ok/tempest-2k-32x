@@ -153,7 +153,7 @@ void gfx_line(int x1, int y1, int x2, int y2, uint8_t col)
         plot(x1, y1, col);
         if (x1 == x2 && y1 == y2)
             break;
-        e2 = err * 2;
+        e2 = err << 1;
         if (e2 >= dy) {
             if (x1 == x2)
                 break;
@@ -277,21 +277,33 @@ void gfx_tri(int x0, int y0, int x1, int y1, int x2, int y2, uint8_t col)
     if (y1 > y2) { tx=x1;x1=x2;x2=tx; ty=y1;y1=y2;y2=ty; }
     if (y2 == y0) return;
 
-    for (int y = (y0 < 0 ? 0 : y0); y <= y2 && y < VIEW_H; y++) {
-        int xa = x0 + (int)((long long)(x2 - x0) * (y - y0) / (y2 - y0));
-        int xb;
-        if (y < y1 && y1 != y0)
-            xb = x0 + (int)((long long)(x1 - x0) * (y - y0) / (y1 - y0));
-        else if (y2 != y1)
-            xb = x1 + (int)((long long)(x2 - x1) * (y - y1) / (y2 - y1));
-        else
-            xb = x1;
-        if (xa > xb) { int t=xa; xa=xb; xb=t; }
-        if (xa < 0) xa = 0;
-        if (xb >= VIEW_W) xb = VIEW_W - 1;
-        if (xa <= xb) {
-            gfx_rect(xa, y, xb - xa + 1, 1, col);
+    int dy02 = y2 - y0;
+    int dy01 = y1 - y0;
+    int dy12 = y2 - y1;
+
+    int32_t dx02_fx = ((int32_t)(x2 - x0) << 16) / dy02;
+    int32_t dx01_fx = dy01 ? (((int32_t)(x1 - x0) << 16) / dy01) : 0;
+    int32_t dx12_fx = dy12 ? (((int32_t)(x2 - x1) << 16) / dy12) : 0;
+
+    int32_t xa_fx = (int32_t)x0 << 16;
+    int32_t xb_fx = (int32_t)x0 << 16;
+
+    for (int y = y0; y <= y2 && y < VIEW_H; y++) {
+        if (y == y1) {
+            xb_fx = (int32_t)x1 << 16;
         }
+        if (y >= 0) {
+            int xa = xa_fx >> 16;
+            int xb = xb_fx >> 16;
+            if (xa > xb) { int t=xa; xa=xb; xb=t; }
+            if (xa < 0) xa = 0;
+            if (xb >= VIEW_W) xb = VIEW_W - 1;
+            if (xa <= xb) {
+                gfx_rect(xa, y, xb - xa + 1, 1, col);
+            }
+        }
+        xa_fx += dx02_fx;
+        xb_fx += (y < y1) ? dx01_fx : dx12_fx;
     }
 }
 
@@ -309,22 +321,24 @@ void gfx_circle(int cx, int cy, int r, uint8_t col)
         gfx_pset(cx + x, cy - y, col);
         if (err <= 0) {
             y += 1;
-            err += 2*y + 1;
+            err += (y << 1) + 1;
         }
         if (err > 0) {
             x -= 1;
-            err -= 2*x + 1;
+            err -= (x << 1) + 1;
         }
     }
 }
 
 void gfx_circle_fill(int cx, int cy, int r, uint8_t col)
 {
+    int r2 = r * r;
     for (int y = -r; y <= r; y++) {
-        for (int x = -r; x <= r; x++) {
-            if (x*x + y*y <= r*r) {
-                gfx_pset(cx + x, cy + y, col);
-            }
+        int y2 = y * y;
+        int x = 0;
+        while ((x + 1) * (x + 1) + y2 <= r2) {
+            x++;
         }
+        gfx_rect(cx - x, cy + y, (x << 1) + 1, 1, col);
     }
 }

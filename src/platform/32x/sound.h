@@ -23,6 +23,8 @@ enum {
 void snd_init(void);          /* called once on master before slave starts */
 void snd_bgm(int song);       /* switch background music */
 void snd_play(int ch, int id);/* trigger one-shot effect on slot ch (1..3) */
+void snd_clear_fb_slave(uint8_t color); /* offload FB clear to Slave SH-2 */
+void snd_wait_clear_slave(void);        /* wait for Slave SH-2 clear to finish */
 void snd_slave(void);         /* mixing loop; runs on slave SH2 */
 
 #endif /* T2K_SOUND_H */

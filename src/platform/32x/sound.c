@@ -18,6 +18,8 @@ typedef struct {
     volatile int32_t bgm;        /* SND_SONG_*, -1 = uninitialised   */
     volatile int32_t sfx[3];     /* 0 = idle, else SND_* trigger     */
     volatile int32_t started;    /* set once master side is ready    */
+    volatile int32_t clear_cmd;  /* 1 = Slave SH2 should clear FB    */
+    volatile uint32_t clear_color;
 } snd_ctl_t;
 
 #define SND_CTL ((snd_ctl_t *)0x2603C000)   /* uncached SDRAM window  */
@@ -38,6 +40,8 @@ void snd_init(void)
     ctl->bgm = -1;
     ctl->sfx[0] = ctl->sfx[1] = ctl->sfx[2] = 0;
     ctl->started = 0;
+    ctl->clear_cmd = 0;
+    ctl->clear_color = 0;
 
     if (MARS_VDP_DISPMODE & MARS_NTSC_FORMAT)
         pwm_cycle = (int)(((23011361u << 1) / SND_RATE + 1) >> 1) + 1;
@@ -76,6 +80,18 @@ void snd_play(int ch, int id)
     if (ch < 1 || ch > 3 || !ctl->started)
         return;
     ctl->sfx[ch - 1] = id;
+}
+
+void snd_clear_fb_slave(uint8_t color)
+{
+    ctl->clear_color = color;
+    ctl->clear_cmd = 1;
+}
+
+void snd_wait_clear_slave(void)
+{
+    while (ctl->clear_cmd != 0)
+        ;
 }
 
 /* ------------------------------------------------------------------ */
@@ -353,6 +369,16 @@ void snd_slave(void)
     bgm.hat.seed = 0x87654321u;
 
     for (;;) {
+        if (ctl->clear_cmd) {
+            uint8_t col = (uint8_t)ctl->clear_color;
+            uint16_t both = (uint16_t)(col | (col << 8));
+            volatile uint16_t *fb = (volatile uint16_t *)0x24000000;
+            for (int i = 0x100; i < (320 * 224 / 2) + 0x100; i++) {
+                fb[i] = both;
+            }
+            ctl->clear_cmd = 0;
+        }
+
         int32_t req, out;
         uint16_t sample;
 

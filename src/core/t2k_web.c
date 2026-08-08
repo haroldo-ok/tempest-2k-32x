@@ -153,8 +153,8 @@ void t2k_web_get_lane_center(int lane, int depth, int *x, int *y, int *z)
     int i0 = lane;
     int i1 = (lane + 1) % (g_cur_web->num_lanes + (g_cur_web->is_closed ? 0 : 1));
     if (!g_cur_web->is_closed && i1 > g_cur_web->num_lanes) i1 = g_cur_web->num_lanes;
-    *x = (g_cur_web->vx[i0] + g_cur_web->vx[i1]) / 2;
-    *y = (g_cur_web->vy[i0] + g_cur_web->vy[i1]) / 2;
+    *x = (g_cur_web->vx[i0] + g_cur_web->vx[i1]) >> 1;
+    *y = (g_cur_web->vy[i0] + g_cur_web->vy[i1]) >> 1;
     *z = depth;
 }
 
@@ -182,19 +182,40 @@ void t2k_web_get_lane_normal(int lane, int *nx, int *ny)
 
 void t2k_web_render(int pulse, int active_lane)
 {
-    int i, n;
-    int sx0_near, sy0_near, sx1_near, sy1_near;
-    int sx0_far,  sy0_far,  sx1_far,  sy1_far;
-    int sx0_mid,  sy0_mid,  sx1_mid,  sy1_mid;
+    int i, n = g_cur_web->num_lanes;
+    int sx_far[MAX_LANES + 1], sy_far[MAX_LANES + 1];
+    int sx_mid[MAX_LANES + 1], sy_mid[MAX_LANES + 1];
+    int sx_near[MAX_LANES + 1], sy_near[MAX_LANES + 1];
     uint8_t col_near = g_cur_web->color_near;
     uint8_t col_far  = g_cur_web->color_far;
+    int angle = 0, cos_a = FX_ONE, sin_a = 0;
 
     if (pulse & 8) {
         col_near = g_cur_web->color_lane;
     }
 
-    n = g_cur_web->num_lanes;
+    if (active_lane == -1) {
+        angle = (pulse << 1) & 255;
+        cos_a = t2k_cos(angle);
+        sin_a = t2k_sin(angle);
+    }
 
+    /* Hoist all vertex rotations & 3D projections OUTSIDE the lane drawing loop */
+    for (i = 0; i <= n; i++) {
+        int vx = g_cur_web->vx[i];
+        int vy = g_cur_web->vy[i];
+        if (active_lane == -1) {
+            int tx = (int)(((int64_t)vx * cos_a - (int64_t)vy * sin_a) >> 16);
+            int ty = (int)(((int64_t)vx * sin_a + (int64_t)vy * cos_a) >> 16);
+            vx = tx;
+            vy = ty;
+        }
+        t2k_project(vx, vy, 500, &sx_far[i],  &sy_far[i]);
+        t2k_project(vx, vy, 250, &sx_mid[i],  &sy_mid[i]);
+        t2k_project(vx, vy, 0,   &sx_near[i], &sy_near[i]);
+    }
+
+    /* Draw all lanes using precomputed screen coordinates (no multiplies/divides in loop!) */
     for (i = 0; i <= n; i++) {
         if (!g_cur_web->is_closed && i == n)
             break;
@@ -206,50 +227,27 @@ void t2k_web_render(int pulse, int active_lane)
             break;
         }
 
-        int vx0 = g_cur_web->vx[i], vy0 = g_cur_web->vy[i];
-        int vx1 = g_cur_web->vx[i_next], vy1 = g_cur_web->vy[i_next];
-        if (active_lane == -1) {
-            int angle = (pulse * 2) & 255;
-            int c = t2k_cos(angle), s = t2k_sin(angle);
-            int tx = (int)(((int64_t)vx0 * c - (int64_t)vy0 * s) >> 16);
-            int ty = (int)(((int64_t)vx0 * s + (int64_t)vy0 * c) >> 16);
-            vx0 = tx; vy0 = ty;
-            tx = (int)(((int64_t)vx1 * c - (int64_t)vy1 * s) >> 16);
-            ty = (int)(((int64_t)vx1 * s + (int64_t)vy1 * c) >> 16);
-            vx1 = tx; vy1 = ty;
-        }
+        /* Shaded lane polygon */
+        uint8_t fill_col = (i & 1) ? 1 : 4;
+        if (i == active_lane) fill_col = 2;
+        gfx_tri(sx_far[i], sy_far[i], sx_far[i_next], sy_far[i_next], sx_near[i], sy_near[i], fill_col);
+        gfx_tri(sx_far[i_next], sy_far[i_next], sx_near[i_next], sy_near[i_next], sx_near[i], sy_near[i], fill_col);
 
-        /* Project inner (far, z=500), middle (z=250), and outer (near, z=0) */
-        t2k_project(vx0, vy0, 500, &sx0_far,  &sy0_far);
-        t2k_project(vx1, vy1, 500, &sx1_far,  &sy1_far);
-
-        t2k_project(vx0, vy0, 250, &sx0_mid,  &sy0_mid);
-        t2k_project(vx1, vy1, 250, &sx1_mid,  &sy1_mid);
-
-        t2k_project(vx0, vy0, 0,   &sx0_near, &sy0_near);
-        t2k_project(vx1, vy1, 0,   &sx1_near, &sy1_near);
-
-        /* Fill translucent/shaded web lane polygon */
-        uint8_t fill_col = (i & 1) ? 1 : 4; /* Alternating dark blue & dark purple */
-        if (i == active_lane) fill_col = 2; /* Highlight player lane with medium blue */
-        gfx_tri(sx0_far, sy0_far, sx1_far, sy1_far, sx0_near, sy0_near, fill_col);
-        gfx_tri(sx1_far, sy1_far, sx1_near, sy1_near, sx0_near, sy0_near, fill_col);
-
-        /* Draw radial lane divider line from far to near */
+        /* Radial lane line */
         uint8_t line_col = col_far;
         if (i == active_lane || (i == active_lane + 1)) {
             line_col = g_cur_web->color_lane;
         }
-        gfx_line(sx0_far, sy0_far, sx0_near, sy0_near, line_col);
+        gfx_line(sx_far[i], sy_far[i], sx_near[i], sy_near[i], line_col);
 
-        /* Draw far ring segment (deep end of tube) */
-        gfx_line(sx0_far, sy0_far, sx1_far, sy1_far, col_far);
+        /* Far ring segment */
+        gfx_line(sx_far[i], sy_far[i], sx_far[i_next], sy_far[i_next], col_far);
 
-        /* Draw middle ring segment */
-        gfx_line(sx0_mid, sy0_mid, sx1_mid, sy1_mid, col_far);
+        /* Middle ring segment */
+        gfx_line(sx_mid[i], sy_mid[i], sx_mid[i_next], sy_mid[i_next], col_far);
 
-        /* Draw near rim segment */
+        /* Near rim segment */
         uint8_t rim_col = (i == active_lane) ? g_cur_web->color_lane : col_near;
-        gfx_line(sx0_near, sy0_near, sx1_near, sy1_near, rim_col);
+        gfx_line(sx_near[i], sy_near[i], sx_near[i_next], sy_near[i_next], rim_col);
     }
 }

@@ -9,6 +9,7 @@
 #include "t2k_math.h"
 #include "gfx.h"
 #include "marsl.h"
+#include "sound.h"
 
 /* 256-color RGB palette (r, g, b in 0..255) */
 static const uint8_t t2k_palette_rgb[256 * 3] = {
@@ -102,7 +103,7 @@ static void draw_hud(void)
 
 void t2k_render_frame(int state, int state_timer, int menu_sel)
 {
-    Mars_ClearScreen(0); /* Black backdrop */
+    snd_wait_clear_slave(); /* Parallel FB clear finished */
 
     /* Starfield always rendered */
     t2k_particles_render();

@@ -35,6 +35,7 @@ void t2k_game_init(void)
 
 void t2k_game_tick(uint16_t pad)
 {
+    snd_clear_fb_slave(0);
     t2k_particles_update();
 
     uint16_t pressed = pad & ~s_old_pad;
